@@ -17,10 +17,11 @@ import mesosphere.marathon.stream.Implicits._
 import mesosphere.marathon.test.MarathonTestHelper
 import mesosphere.mesos.protos.Implicits.slaveIDToProto
 import mesosphere.mesos.protos.SlaveID
+import org.scalatest.Inside
 
 import scala.collection.immutable.Seq
 
-class InstanceOpFactoryImplTest extends UnitTest {
+class InstanceOpFactoryImplTest extends UnitTest with Inside {
 
   "InstanceOpFactoryImpl" should {
     "Copy SlaveID from Offer to Task" in {
@@ -38,10 +39,12 @@ class InstanceOpFactoryImplTest extends UnitTest {
       val request = InstanceOpFactory.Request(app, offer, runningInstances, additionalLaunches = 1)
       val matchResult = f.instanceOpFactory.matchOfferRequest(request)
 
-      matchResult shouldBe a[OfferMatchResult.Match]
-      val matched = matchResult.asInstanceOf[OfferMatchResult.Match]
-      assert(matched.instanceOp.stateOp.possibleNewState.isDefined, "instanceOp should have a defined new state")
-      assert(matched.instanceOp.stateOp.possibleNewState.get.tasksMap.size == 1, "new state should have 1 task")
+      val matched = inside(matchResult) {
+        case matched: OfferMatchResult.Match =>
+          assert(matched.instanceOp.stateOp.possibleNewState.isDefined, "instanceOp should have a defined new state")
+          assert(matched.instanceOp.stateOp.possibleNewState.get.tasksMap.size == 1, "new state should have 1 task")
+          matched
+      }
 
       val (expectedTaskId, _) = matched.instanceOp.stateOp.possibleNewState.get.tasksMap.head
       val expectedTask = Task.LaunchedEphemeral(
@@ -94,8 +97,10 @@ class InstanceOpFactoryImplTest extends UnitTest {
       val matchResult = f.instanceOpFactory.matchOfferRequest(request)
 
       Then("A Match with Launch is inferred")
-      matchResult shouldBe a[OfferMatchResult.Match]
-      matchResult.asInstanceOf[OfferMatchResult.Match].instanceOp shouldBe a[InstanceOp.LaunchTask]
+      inside(matchResult) {
+        case mr: OfferMatchResult.Match =>
+          mr.instanceOp shouldBe a[InstanceOp.LaunchTask]
+      }
     }
 
     "Resident app -> None (insufficient offer)" in {
@@ -137,8 +142,10 @@ class InstanceOpFactoryImplTest extends UnitTest {
       val matchResult = f.instanceOpFactory.matchOfferRequest(request)
 
       Then("A Match with ReserveAndCreateVolumes is returned")
-      matchResult shouldBe a[OfferMatchResult.Match]
-      matchResult.asInstanceOf[OfferMatchResult.Match].instanceOp shouldBe a[InstanceOp.ReserveAndCreateVolumes]
+      inside(matchResult) {
+        case mr: OfferMatchResult.Match =>
+          mr.instanceOp shouldBe a[InstanceOp.ReserveAndCreateVolumes]
+      }
     }
 
     "Resident app -> Launch succeeds" in {
@@ -162,9 +169,11 @@ class InstanceOpFactoryImplTest extends UnitTest {
       val matchResult = f.instanceOpFactory.matchOfferRequest(request)
 
       Then("A Match with a Launch is returned")
-      matchResult shouldBe a[OfferMatchResult.Match]
-      val matched = matchResult.asInstanceOf[OfferMatchResult.Match]
-      matched.instanceOp shouldBe a[InstanceOp.LaunchTask]
+      val matched = inside(matchResult) {
+        case matched: OfferMatchResult.Match =>
+          matched.instanceOp shouldBe a[InstanceOp.LaunchTask]
+          matched
+      }
 
       And("the taskInfo contains the correct persistent volume")
       val taskInfoResources = matched.instanceOp.offerOperations.head.getLaunch.getTaskInfos(0).getResourcesList
@@ -214,15 +223,17 @@ class InstanceOpFactoryImplTest extends UnitTest {
       val request = InstanceOpFactory.Request(app, offer, Map(existingReservedInstance.instanceId -> existingReservedInstance), additionalLaunches = 1)
       val result = f.instanceOpFactory.matchOfferRequest(request)
 
-      // I am truly sorry for this ugly nested match. The alternative is
-      result shouldBe a[OfferMatchResult.Match]
-      val expectedResult = result.asInstanceOf[OfferMatchResult.Match]
-      expectedResult.instanceOp shouldBe a[InstanceOp.LaunchTask]
-      val expectedInstanceOp = expectedResult.instanceOp.asInstanceOf[InstanceOp.LaunchTask]
-      expectedInstanceOp.stateOp shouldBe a[InstanceUpdateOperation.LaunchOnReservation]
-      val expectedStateOp = expectedInstanceOp.stateOp.asInstanceOf[InstanceUpdateOperation.LaunchOnReservation]
-      expectedStateOp.agentInfo.host shouldBe updatedHostName
-      expectedStateOp.agentInfo.agentId shouldBe Some(updatedAgentId)
+      inside(result) {
+        case m: OfferMatchResult.Match =>
+          inside(m.instanceOp) {
+            case launchTask: InstanceOp.LaunchTask =>
+              inside(launchTask.stateOp) {
+                case launchOnReservation: InstanceUpdateOperation.LaunchOnReservation =>
+                  launchOnReservation.agentInfo.host shouldBe updatedHostName
+                  launchOnReservation.agentInfo.agentId shouldBe Some(updatedAgentId)
+              }
+          }
+      }
     }
   }
 
